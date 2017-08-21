@@ -12,7 +12,7 @@ import keras.backend as K
 from keras.layers import Input, Reshape, Flatten
 from keras.layers import Activation, Dense
 from keras.layers.normalization import BatchNormalization
-# from keras.layers.advanced_activations import LeakyReLU
+from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.layers.pooling import MaxPooling2D
 from keras.models import Model
@@ -34,17 +34,17 @@ class Generator(object):
         gen_input = Input(shape=self.latent_shape)
         # layer 1 - higher dimensional dense layer
         cnn = Dense(1024)(gen_input)
-        cnn = Activation('tanh')(cnn)
+        cnn = Activation('relu')(cnn)
         # layer 2 - higer dimensional dense layer
         cnn = Dense(7 * 7 * 128)(cnn)
         cnn = BatchNormalization()(cnn)
-        cnn = Activation('tanh')(cnn)
+        cnn = Activation('relu')(cnn)
         # transform 1D to 3D matrix (2D image plus channels)
         cnn = Reshape((7, 7, 128))(cnn)
         # layer 3 - convulational layer - filter matching
         cnn = UpSampling2D(size=(2, 2))(cnn)
         cnn = Conv2D(self.n_filters, 5, padding='same')(cnn)
-        cnn = Activation('tanh')(cnn)
+        cnn = Activation('relu')(cnn)
         # layer 4 - convulational layer - channel reducer
         cnn = UpSampling2D(size=(2, 2))(cnn)
         cnn = Conv2D(1, 5, padding='same')(cnn)
@@ -64,17 +64,17 @@ class Discriminator(object):
         disc_input = Input(shape=self.input_shape)
 
         cnn = Conv2D(self.n_filters, 5, padding='same')(disc_input)
-        cnn = Activation('tanh')(cnn)
+        cnn = LeakyReLU()(cnn)
         cnn = MaxPooling2D(pool_size=(2, 2))(cnn)
 
         cnn = Conv2D(self.n_filters * 2, 5, padding='same')(cnn)
-        cnn = Activation('tanh')(cnn)
+        cnn = LeakyReLU()(cnn)
         cnn = MaxPooling2D(pool_size=(2, 2))(cnn)
 
         cnn = Flatten()(cnn)
 
         cnn = Dense(1024)(cnn)
-        cnn = Activation('tanh')(cnn)
+        cnn = LeakyReLU()(cnn)
 
         cnn = Dense(1)(cnn)
         disc_output = Activation('sigmoid')(cnn)
@@ -129,12 +129,15 @@ class AnoGan(object):
                 image_batch = X_train[idx * batch_size:(idx + 1) * batch_size]
                 generated_images = self.generator.model.predict(noise, verbose=verbose)
                 X = np.concatenate((image_batch, generated_images))
-                y = [1] * batch_size + [0] * batch_size
+                y = np.array([1] * batch_size + [0] * batch_size)
                 d_loss = self.discriminator.model.train_on_batch(X, y)
                 epoch_disc_loss.append(d_loss)
-                noise = np.random.uniform(-1, 1, (batch_size, 100))
+                noise = np.random.uniform(-1, 1, (2 * batch_size, self.latent_shape[0]))
                 self.discriminator.model.trainable = False
-                g_loss = self.model.train_on_batch(noise, [1] * batch_size)
+                # we want to train the generator to trick the discriminator
+                # For the generator, we want all the {fake, not-fake}
+                # labels to say not-fake
+                g_loss = self.model.train_on_batch(noise, np.ones(2 * batch_size))
                 self.discriminator.model.trainable = True
                 epoch_gen_loss.append(g_loss)
 
